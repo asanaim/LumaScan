@@ -418,15 +418,14 @@ class MainActivity : ComponentActivity() {
                 extractMlKitPageData(pageUris, script)
             }
 
+            val lineBreak = "\n"
+            val doubleLineBreak = "\n\n"
             val combinedText = pageDataList.mapIndexedNotNull { index, page ->
                 val content = page.fullPageText.trim()
                 if (content.isNotEmpty()) {
-                    if (pageDataList.size == 1) content else "--- Page ${index + 1} ---
-$content"
+                    if (pageDataList.size == 1) content else "--- Page ${index + 1} ---" + lineBreak + content
                 } else null
-            }.joinToString("
-
-")
+            }.joinToString(doubleLineBreak)
 
             val searchablePdfUri = SearchablePdfGenerator.generateSearchablePdf(
                 context = this@MainActivity,
