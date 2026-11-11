@@ -2,6 +2,7 @@ package com.lumascan.app
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -10,6 +11,7 @@ import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import androidx.core.content.FileProvider
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.abs
@@ -27,6 +29,9 @@ data class PageOcrData(
 
 object SearchablePdfGenerator {
 
+    const val DOWNLOAD_PAGE_URL = "https://asanaim.github.io/LumaScan/"
+    const val DIRECT_APK_DOWNLOAD_URL = "https://github.com/asanaim/LumaScan/releases/download/latest/LumaScan.apk"
+
     private val sensitivePattern = Regex(
         "(\\b\\d{4}[ -]?\\d{4}[ -]?\\d{4,7}\\b)|(\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b)|(\\+?\\d[\\d -]{7,14}\\d)"
     )
@@ -35,10 +40,6 @@ object SearchablePdfGenerator {
         return sensitivePattern.containsMatchIn(text)
     }
 
-    /**
-     * Stitches two scanned pages (e.g., ID Card Front & Back) onto a single A4 portrait canvas
-     * at 300 DPI aspect ratio before OCR and PDF generation.
-     */
     fun stitchTwoPagesOntoA4(front: Bitmap, back: Bitmap): Bitmap {
         val a4Width = maxOf(front.width, back.width, 1600)
         val a4Height = (a4Width * 1.414f).toInt()
@@ -68,10 +69,6 @@ object SearchablePdfGenerator {
         return combined
     }
 
-    /**
-     * Converts spatial word bounding boxes into an aligned CSV table by clustering
-     * words with similar vertical centerY into rows and sorting left-to-right.
-     */
     fun convertWordsToCsv(pages: List<PageOcrData>): String {
         val sb = StringBuilder()
         val lineBreak = "\n"
@@ -131,16 +128,23 @@ object SearchablePdfGenerator {
         return if (escaped.contains(",") || escaped.contains("\"")) "\"$escaped\"" else escaped
     }
 
-    /**
-     * Generates a multi-page searchable PDF where each page contains the scanned
-     * document bitmap, optional permanent black redaction boxes over sensitive PII,
-     * and an aligned invisible selectable OCR text overlay.
-     */
+    private fun compressBitmapEfficient(bmp: Bitmap): Bitmap {
+        return try {
+            val stream = ByteArrayOutputStream()
+            bmp.compress(Bitmap.CompressFormat.JPEG, 85, stream)
+            val byteArray = stream.toByteArray()
+            BitmapFactory.decodeByteArray(byteArray, 0, byteArray.size) ?: bmp
+        } catch (_: Exception) {
+            bmp
+        }
+    }
+
     fun generateSearchablePdf(
         context: Context,
         pages: List<PageOcrData>,
         outputFileName: String,
-        redactSensitivePii: Boolean = false
+        redactSensitivePii: Boolean = false,
+        embedFooterDownloadLink: Boolean = true
     ): Uri? {
         if (pages.isEmpty()) return null
 
@@ -157,19 +161,27 @@ object SearchablePdfGenerator {
             style = Paint.Style.FILL
         }
 
+        val footerTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(140, 100, 100, 100)
+            textSize = 24f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+            textAlign = Paint.Align.CENTER
+        }
+
         try {
             pages.forEachIndexed { index, pageData ->
-                val bmp = pageData.bitmap
+                val compressedBmp = compressBitmapEfficient(pageData.bitmap)
+
                 val pageInfo = PdfDocument.PageInfo.Builder(
-                    bmp.width,
-                    bmp.height,
+                    compressedBmp.width,
+                    compressedBmp.height,
                     index + 1
                 ).create()
 
                 val page = pdfDocument.startPage(pageInfo)
                 val canvas = page.canvas
 
-                canvas.drawBitmap(bmp, 0f, 0f, null)
+                canvas.drawBitmap(compressedBmp, 0f, 0f, null)
 
                 for (word in pageData.words) {
                     val box = word.boundingBox
@@ -177,7 +189,6 @@ object SearchablePdfGenerator {
                     if (value.isEmpty() || box.width() <= 0 || box.height() <= 0) continue
 
                     if (redactSensitivePii && isSensitiveToken(value)) {
-                        // Draw permanent black redaction bar and omit from PDF text layer
                         canvas.drawRect(box, redactionPaint)
                         continue
                     }
@@ -196,7 +207,22 @@ object SearchablePdfGenerator {
                     canvas.drawText(value, box.left.toFloat(), baselineY, invisibleTextPaint)
                 }
 
+                if (embedFooterDownloadLink) {
+                    val footerY = compressedBmp.height.toFloat() - 28f
+                    val centerX = compressedBmp.width.toFloat() / 2f
+                    val footerLabel = "Scanned with LumaScan • Download App: $DOWNLOAD_PAGE_URL"
+
+                    canvas.drawText(footerLabel, centerX, footerY, footerTextPaint)
+
+                    invisibleTextPaint.textSize = 26f
+                    invisibleTextPaint.textScaleX = 1.0f
+                    canvas.drawText(DOWNLOAD_PAGE_URL, centerX - 100f, footerY, invisibleTextPaint)
+                }
+
                 pdfDocument.finishPage(page)
+                if (compressedBmp != pageData.bitmap) {
+                    compressedBmp.recycle()
+                }
             }
 
             val outFile = File(context.cacheDir, outputFileName)

@@ -18,6 +18,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -89,6 +90,7 @@ class MainActivity : ComponentActivity() {
     private val recognizers = mutableMapOf<OcrScript, TextRecognizer>()
     private val tessMutex = Mutex()
     private var cachedTessApi: TessBaseAPI? = null
+    private val dbHelper by lazy { LumaScanDbHelper(this) }
 
     private fun getMlKitRecognizer(script: OcrScript): TextRecognizer {
         return recognizers.getOrPut(script) {
@@ -133,10 +135,21 @@ class MainActivity : ComponentActivity() {
             var selectedScript by remember { mutableStateOf(OcrScript.LATIN) }
             var idCardStitchMode by remember { mutableStateOf(false) }
             var redactSensitiveMode by remember { mutableStateOf(false) }
+            var embedLinkFooter by remember { mutableStateOf(true) }
             var searchQuery by remember { mutableStateOf("") }
 
             val scannedDocs = remember { mutableStateListOf<ScannedDoc>() }
             var activeOcrDoc by remember { mutableStateOf<ScannedDoc?>(null) }
+
+            LaunchedEffect(Unit) {
+                withContext(Dispatchers.IO) {
+                    val saved = dbHelper.getAllDocs()
+                    withContext(Dispatchers.Main) {
+                        scannedDocs.clear()
+                        scannedDocs.addAll(saved)
+                    }
+                }
+            }
 
             val filteredDocs = remember(scannedDocs.size, searchQuery, scannedDocs.toList()) {
                 if (searchQuery.isBlank()) {
@@ -149,6 +162,22 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            val galleryLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 50)
+            ) { uris ->
+                if (uris.isNotEmpty()) {
+                    handlePageUris(
+                        uris = uris,
+                        currentScript = selectedScript,
+                        stitchId = idCardStitchMode,
+                        redactPii = redactSensitiveMode,
+                        embedFooter = embedLinkFooter,
+                        scannedDocs = scannedDocs,
+                        rawPdfUri = null
+                    )
+                }
+            }
+
             val scannerLauncher = rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.StartIntentSenderForResult()
             ) { result ->
@@ -156,68 +185,16 @@ class MainActivity : ComponentActivity() {
                     val scanResult = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
                     val rawPdf = scanResult?.pdf
                     val pages = scanResult?.pages.orEmpty()
-                    val docId = System.currentTimeMillis()
-                    val timestamp = SimpleDateFormat("MMM dd, yyyy • hh:mm a", Locale.getDefault()).format(Date())
-                    val tempName = "LumaScan_${docId % 10000}.pdf"
-                    val currentScript = selectedScript
-                    val stitchId = idCardStitchMode
-                    val redactPii = redactSensitiveMode
-
-                    val placeholderDoc = ScannedDoc(
-                        id = docId,
-                        title = tempName,
-                        pdfUri = rawPdf?.uri,
-                        pageCount = pages.size.coerceAtLeast(rawPdf?.pageCount ?: 1),
-                        date = timestamp,
-                        scriptLabel = currentScript.label,
-                        ocrText = "",
-                        isRedacted = redactPii,
-                        isIdStitch = stitchId,
-                        isSearchablePdf = false,
-                        isOcrProcessing = pages.isNotEmpty()
-                    )
-                    scannedDocs.add(0, placeholderDoc)
-
                     if (pages.isNotEmpty()) {
-                        processPagesFast(
-                            pageUris = pages.map { it.imageUri },
-                            script = currentScript,
-                            docId = docId,
-                            stitchTwoPages = stitchId,
-                            redactPii = redactPii
-                        ) { smartPdfName, extractedText, csvContent, searchablePdfUri, pageCount ->
-                            val finalPdfUri = searchablePdfUri ?: rawPdf?.uri
-                            if (finalPdfUri != null) {
-                                savePdfToDownloads(finalPdfUri, smartPdfName)
-                            }
-                            val baseSmartName = smartPdfName.removeSuffix(".pdf")
-                            if (extractedText.isNotBlank()) {
-                                saveTextToDownloads(extractedText, "$baseSmartName.txt", "text/plain")
-                            }
-                            if (csvContent.isNotBlank()) {
-                                saveTextToDownloads(csvContent, "${baseSmartName}_table.csv", "text/csv")
-                            }
-
-                            val phone = extractPhoneNumber(extractedText)
-                            val email = extractEmailAddress(extractedText)
-
-                            val index = scannedDocs.indexOfFirst { item -> item.id == docId }
-                            if (index != -1) {
-                                scannedDocs[index] = scannedDocs[index].copy(
-                                    title = smartPdfName,
-                                    pdfUri = finalPdfUri,
-                                    pageCount = pageCount,
-                                    ocrText = extractedText,
-                                    csvTable = csvContent,
-                                    detectedPhone = phone,
-                                    detectedEmail = email,
-                                    isSearchablePdf = searchablePdfUri != null && extractedText.isNotBlank(),
-                                    isOcrProcessing = false
-                                )
-                            }
-                        }
-                    } else if (rawPdf != null) {
-                        savePdfToDownloads(rawPdf.uri, tempName)
+                        handlePageUris(
+                            uris = pages.map { it.imageUri },
+                            currentScript = selectedScript,
+                            stitchId = idCardStitchMode,
+                            redactPii = redactSensitiveMode,
+                            embedFooter = embedLinkFooter,
+                            scannedDocs = scannedDocs,
+                            rawPdfUri = rawPdf?.uri
+                        )
                     }
                 }
             }
@@ -239,20 +216,31 @@ class MainActivity : ComponentActivity() {
             Surface(modifier = Modifier.fillMaxSize(), color = appleBg) {
                 Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 14.dp)) {
                     Spacer(modifier = Modifier.height(10.dp))
-                    Text(
-                        text = "LumaScan",
-                        fontSize = 32.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.Black
-                    )
-                    Text(
-                        text = "Fast Multi-Core Offline OCR • Smart PDF & Table Exporter",
-                        fontSize = 13.sp,
-                        color = Color.Gray
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "LumaScan",
+                                fontSize = 32.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.Black
+                            )
+                            Text(
+                                text = "Fast Offline Scanner • Searchable PDF • Multi-Script",
+                                fontSize = 13.sp,
+                                color = Color.Gray
+                            )
+                        }
+                        IconButton(onClick = { shareAppDownloadLink() }) {
+                            Text("🔗", fontSize = 22.sp)
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Language Script Selector
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -274,7 +262,6 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    // Pro Feature Toggles: ID Card 2-to-1 Stitch & Privacy Redaction
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -301,31 +288,55 @@ class MainActivity : ComponentActivity() {
                                 selectedLabelColor = Color.White
                             )
                         )
+                        FilterChip(
+                            selected = embedLinkFooter,
+                            onClick = { embedLinkFooter = !embedLinkFooter },
+                            label = { Text("🔗 PDF App Link", fontSize = 12.sp) },
+                            shape = RoundedCornerShape(18.dp),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Color(0xFF5856D6),
+                                selectedLabelColor = Color.White
+                            )
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    Button(
-                        onClick = { startScan() },
-                        colors = ButtonDefaults.buttonColors(containerColor = appleBlue),
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth().height(52.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Text(
-                            text = if (idCardStitchMode) "Scan ID Front & Back (${selectedScript.label})"
-                            else "New Camera Scan (${selectedScript.label})",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Button(
+                            onClick = { startScan() },
+                            colors = ButtonDefaults.buttonColors(containerColor = appleBlue),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.weight(1f).height(52.dp)
+                        ) {
+                            Text(
+                                text = "Camera Scan",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                galleryLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.height(52.dp)
+                        ) {
+                            Text("Import Gallery", fontSize = 14.sp, color = appleBlue)
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Instant Offline Full-Text Search Bar
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
-                        placeholder = { Text("Search inside scanned documents & OCR...", fontSize = 14.sp) },
+                        placeholder = { Text("Search inside scanned documents & OCR text...", fontSize = 14.sp) },
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
@@ -337,8 +348,8 @@ class MainActivity : ComponentActivity() {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(
                                 text = if (searchQuery.isBlank())
-                                    "Tap 'New Camera Scan' for auto-named searchable PDFs, CSV tables, and vCard extraction."
-                                else "No scans matching \"$searchQuery\".",
+                                    "Tap 'Camera Scan' or 'Import Gallery' to create searchable PDFs."
+                                else "No scans found matching \"$searchQuery\".",
                                 color = Color.Gray,
                                 fontSize = 14.sp
                             )
@@ -399,7 +410,7 @@ class MainActivity : ComponentActivity() {
                                                 )
                                                 Spacer(modifier = Modifier.width(8.dp))
                                                 Text(
-                                                    text = "Running parallel multi-core OCR & smart naming...",
+                                                    text = "Extracting text & optimizing PDF size...",
                                                     fontSize = 13.sp,
                                                     color = Color.Gray
                                                 )
@@ -465,8 +476,6 @@ class MainActivity : ComponentActivity() {
                                                     }
                                                 }
                                             }
-                                        } else {
-                                            Text("Image-only PDF saved (no text detected).", fontSize = 13.sp, color = Color.LightGray)
                                         }
                                     }
                                 }
@@ -519,12 +528,92 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun handlePageUris(
+        uris: List<Uri>,
+        currentScript: OcrScript,
+        stitchId: Boolean,
+        redactPii: Boolean,
+        embedFooter: Boolean,
+        scannedDocs: MutableList<ScannedDoc>,
+        rawPdfUri: Uri?
+    ) {
+        val docId = System.currentTimeMillis()
+        val timestamp = SimpleDateFormat("MMM dd, yyyy • hh:mm a", Locale.getDefault()).format(Date())
+        val tempName = "LumaScan_${docId % 10000}.pdf"
+
+        val placeholderDoc = ScannedDoc(
+            id = docId,
+            title = tempName,
+            pdfUri = rawPdfUri,
+            pageCount = uris.size,
+            date = timestamp,
+            scriptLabel = currentScript.label,
+            ocrText = "",
+            isRedacted = redactPii,
+            isIdStitch = stitchId,
+            isSearchablePdf = false,
+            isOcrProcessing = true
+        )
+        scannedDocs.add(0, placeholderDoc)
+
+        processPagesFast(
+            pageUris = uris,
+            script = currentScript,
+            docId = docId,
+            stitchTwoPages = stitchId,
+            redactPii = redactPii,
+            embedFooter = embedFooter
+        ) { smartPdfName, extractedText, csvContent, searchablePdfUri, pageCount ->
+            val finalPdfUri = searchablePdfUri ?: rawPdfUri
+            if (finalPdfUri != null) {
+                savePdfToDownloads(finalPdfUri, smartPdfName)
+            }
+            val baseSmartName = smartPdfName.removeSuffix(".pdf")
+            if (extractedText.isNotBlank()) {
+                saveTextToDownloads(extractedText, "$baseSmartName.txt", "text/plain")
+            }
+            if (csvContent.isNotBlank()) {
+                saveTextToDownloads(csvContent, "${baseSmartName}_table.csv", "text/csv")
+            }
+
+            val phone = extractPhoneNumber(extractedText)
+            val email = extractEmailAddress(extractedText)
+
+            val updatedDoc = ScannedDoc(
+                id = docId,
+                title = smartPdfName,
+                pdfUri = finalPdfUri,
+                pageCount = pageCount,
+                date = timestamp,
+                scriptLabel = currentScript.label,
+                ocrText = extractedText,
+                csvTable = csvContent,
+                detectedPhone = phone,
+                detectedEmail = email,
+                isRedacted = redactPii,
+                isIdStitch = stitchId,
+                isSearchablePdf = searchablePdfUri != null && extractedText.isNotBlank(),
+                isOcrProcessing = false
+            )
+
+            val index = scannedDocs.indexOfFirst { item -> item.id == docId }
+            if (index != -1) {
+                scannedDocs[index] = updatedDoc
+            }
+
+            lifecycleScope.launch(Dispatchers.IO) {
+                dbHelper.insertOrUpdateDoc(updatedDoc)
+            }
+        }
+    }
+
     private fun processPagesFast(
         pageUris: List<Uri>,
         script: OcrScript,
         docId: Long,
         stitchTwoPages: Boolean,
         redactPii: Boolean,
+        embedFooter: Boolean,
         onComplete: (
             smartPdfName: String,
             extractedText: String,
@@ -575,7 +664,8 @@ class MainActivity : ComponentActivity() {
                 context = this@MainActivity,
                 pages = pageDataList,
                 outputFileName = smartPdfName,
-                redactSensitivePii = redactPii
+                redactSensitivePii = redactPii,
+                embedFooterDownloadLink = embedFooter
             )
 
             pageDataList.forEach { it.bitmap.recycle() }
@@ -690,6 +780,17 @@ class MainActivity : ComponentActivity() {
             email?.let { putExtra(ContactsContract.Intents.Insert.EMAIL, it) }
         }
         startActivity(intent)
+    }
+
+    private fun shareAppDownloadLink() {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(
+                Intent.EXTRA_TEXT,
+                "Download LumaScan (Fast, 100% Offline Searchable Scanner & OCR): ${SearchablePdfGenerator.DOWNLOAD_PAGE_URL}"
+            )
+        }
+        startActivity(Intent.createChooser(intent, "Share LumaScan Download Link"))
     }
 
     private fun decodeMutableBitmap(uri: Uri): Bitmap? {

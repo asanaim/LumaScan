@@ -11,10 +11,9 @@ android {
         applicationId = "com.lumascan.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.2.0"
+        versionCode = 4
+        versionName = "1.3.0"
 
-        // Bundle only 64-bit ARM native binaries (cuts APK size by ~45% with zero quality loss)
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
@@ -54,16 +53,16 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
 
-    // ML Kit Document Scanner (Auto edge detection, perspective crop, Whiteboard & Doc filters)
+    // ML Kit Document Scanner
     implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
 
-    // Lightweight Bundled Offline ML Kit v2 Recognizers (English/Latin + Devanagari)
+    // Bundled Offline ML Kit v2 Multi-Script Recognizers (Latin + Devanagari)
     implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("com.google.mlkit:text-recognition-devanagari:16.0.1")
 
-    // Offline Multi-Threaded OpenMP Tesseract 5 Engine for Bangla + English ("ben+eng")
+    // Offline Tesseract 5 Engine for Bangla + English
     implementation("cz.adaptech.tesseract4android:tesseract4android-openmp:4.9.0")
 
-    // Coroutines for parallel multi-core page OCR
+    // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 }
