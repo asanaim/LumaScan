@@ -1,0 +1,3 @@
+-keep class com.google.mlkit.** { *; }
+-keep class com.googlecode.tesseract.android.** { *; }
+-dontwarn com.google.mlkit.**

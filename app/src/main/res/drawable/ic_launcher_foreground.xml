@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Apple-style Viewfinder Corners -->
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M28,40 L28,32 C28,29.8 29.8,28 32,28 L40,28
+                          M68,28 L76,28 C78.2,28 80,29.8 80,32 L80,40
+                          M80,68 L80,76 C80,78.2 78.2,80 76,80 L68,80
+                          M40,80 L32,80 C29.8,80 28,78.2 28,76 L28,68" />
+    <!-- Minimalist Document Page -->
+    <path
+        android:fillColor="#F2FFFFFF"
+        android:pathData="M40,36 C38.9,36 38,36.9 38,38 L38,70 C38,71.1 38.9,72 40,72 L68,72 C69.1,72 70,71.1 70,70 L70,46 L60,36 L40,36 Z" />
+    <!-- Document Text Lines -->
+    <path
+        android:strokeColor="#FF0051D5"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M44,52 L64,52 M44,59 L64,59 M44,66 L56,66" />
+    <!-- Glowing Laser Scan Line -->
+    <path
+        android:strokeColor="#FF30D158"
+        android:strokeWidth="3.0"
+        android:strokeLineCap="round"
+        android:pathData="M24,54 L84,54" />
+</vector>
