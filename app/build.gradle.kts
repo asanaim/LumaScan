@@ -4,15 +4,15 @@ plugins {
 }
 
 android {
-    namespace = "com.lumascan.app"
+    namespace = "com.vellumscan.app"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.lumascan.app"
+        applicationId = "com.vellumscan.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.3.0"
+        versionCode = 5
+        versionName = "2.0.0"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -56,11 +56,10 @@ dependencies {
     // ML Kit Document Scanner
     implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
 
-    // Bundled Offline ML Kit v2 Multi-Script Recognizers (Latin + Devanagari)
+    // Default Bundled Offline ML Kit Latin Recognizer
     implementation("com.google.mlkit:text-recognition:16.0.1")
-    implementation("com.google.mlkit:text-recognition-devanagari:16.0.1")
 
-    // Offline Tesseract 5 Engine for Bangla + English
+    // Offline Multi-Threaded Tesseract 5 Engine (Default Bangla + On-Demand Devanagari/CJK)
     implementation("cz.adaptech.tesseract4android:tesseract4android-openmp:4.9.0")
 
     // Coroutines

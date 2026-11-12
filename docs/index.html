@@ -3,16 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LumaScan — Offline Searchable Document Scanner for Android</title>
+  <title>VellumScan — Offline Searchable Document Scanner for Android</title>
   <style>
     :root {
       --bg: #F2F2F7;
-      --card-bg: rgba(255, 255, 255, 0.85);
+      --card-bg: rgba(255, 255, 255, 0.9);
       --accent: #0A84FF;
       --accent-hover: #0071E3;
       --text: #1C1C1E;
       --secondary: #8E8E93;
-      --green: #30D158;
     }
     * {
       box-sizing: border-box;
@@ -36,19 +35,19 @@
       text-align: center;
     }
     .app-icon {
-      width: 120px;
-      height: 120px;
+      width: 116px;
+      height: 116px;
       border-radius: 28px;
-      box-shadow: 0 16px 36px rgba(0, 81, 213, 0.28);
-      margin: 20px auto 28px auto;
-      background: linear-gradient(135deg, #0A84FF, #0051D5);
+      box-shadow: 0 16px 36px rgba(28, 28, 30, 0.25);
+      margin: 16px auto 26px auto;
+      background: linear-gradient(135deg, #1C1C1E, #2C2C2E);
       display: flex;
       align-items: center;
       justify-content: center;
     }
     .app-icon svg {
-      width: 80px;
-      height: 80px;
+      width: 78px;
+      height: 78px;
     }
     h1 {
       font-size: 40px;
@@ -57,10 +56,10 @@
       margin-bottom: 8px;
     }
     p.subtitle {
-      font-size: 19px;
+      font-size: 18px;
       color: var(--secondary);
       line-height: 1.45;
-      margin-bottom: 34px;
+      margin-bottom: 32px;
     }
     .download-card {
       background: var(--card-bg);
@@ -69,7 +68,7 @@
       padding: 32px 24px;
       box-shadow: 0 8px 24px rgba(0,0,0,0.06);
       border: 1px solid rgba(255,255,255,0.7);
-      margin-bottom: 36px;
+      margin-bottom: 34px;
     }
     .btn-download {
       display: inline-flex;
@@ -95,107 +94,95 @@
     .file-meta {
       font-size: 13px;
       color: var(--secondary);
+      line-height: 1.5;
     }
     .features-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 16px;
       text-align: left;
-      margin-bottom: 40px;
+      margin-bottom: 36px;
     }
     @media (max-width: 580px) {
       .features-grid { grid-template-columns: 1fr; }
     }
     .feature-card {
       background: var(--card-bg);
-      backdrop-filter: blur(20px);
       border-radius: 18px;
       padding: 20px;
       box-shadow: 0 4px 16px rgba(0,0,0,0.04);
-      border: 1px solid rgba(255,255,255,0.6);
     }
-    .feature-icon {
-      font-size: 26px;
-      margin-bottom: 10px;
-    }
-    .feature-title {
-      font-size: 16px;
-      font-weight: 600;
-      margin-bottom: 4px;
-    }
-    .feature-desc {
-      font-size: 13px;
-      color: var(--secondary);
-      line-height: 1.4;
-    }
-    footer {
-      font-size: 13px;
-      color: var(--secondary);
-      margin-top: 20px;
-    }
-    footer a {
-      color: var(--accent);
-      text-decoration: none;
-    }
+    .feature-icon { font-size: 24px; margin-bottom: 8px; }
+    .feature-title { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+    .feature-desc { font-size: 13px; color: var(--secondary); line-height: 1.4; }
+    footer { font-size: 13px; color: var(--secondary); margin-top: 16px; }
+    footer a { color: var(--accent); text-decoration: none; }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="app-icon">
       <svg viewBox="0 0 108 108" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M28 40V32C28 29.8 29.8 28 32 28H40M68 28H76C78.2 28 80 29.8 80 32V40M80 68V76C80 78.2 78.2 80 76 80H68M40 80H32C29.8 80 28 78.2 28 76V68" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M40 36C38.9 36 38 36.9 38 38V70C38 71.1 38.9 72 40 72H68C69.1 72 70 71.1 70 70V46L60 36H40Z" fill="#FFFFFF" fill-opacity="0.95"/>
-        <path d="M44 52H64M44 59H64M44 66H56" stroke="#0051D5" stroke-width="2.5" stroke-linecap="round"/>
-        <path d="M24 54H84" stroke="#30D158" stroke-width="3" stroke-linecap="round"/>
+        <path d="M27 39V31C27 28.8 28.8 27 31 27H39M69 27H77C79.2 27 81 28.8 81 31V39M81 69V77C81 79.2 79.2 81 77 81H69M39 81H31C28.8 81 27 79.2 27 77V69" stroke="#0A84FF" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M39 35C37.9 35 37 35.9 37 37V71C37 72.1 37.9 73 39 73H69C70.1 73 71 72.1 71 71V45L61 35H39Z" fill="#FFFFFF"/>
+        <path d="M61 35V45H71L61 35Z" fill="#D1D1D6"/>
+        <path d="M43 51H63M43 58H65M43 65H55" stroke="#3A3A3C" stroke-width="2.4" stroke-linecap="round"/>
+        <path d="M23 54H85" stroke="#30D158" stroke-width="2.8" stroke-linecap="round"/>
       </svg>
     </div>
 
-    <h1>LumaScan</h1>
-    <p class="subtitle">Fast, privacy-first offline document scanner, searchable PDF maker, and multi-script OCR for Android.</p>
+    <h1>VellumScan</h1>
+    <p class="subtitle">Fast, offline document scanner, searchable PDF maker, and multi-script OCR for Android.</p>
 
     <div class="download-card">
-      <a href="https://github.com/asanaim/LumaScan/releases/download/latest/LumaScan.apk" class="btn-download">
-        Download LumaScan APK
+      <a id="apk-download-btn" href="https://github.com/asanaim/LumaScan/releases/latest/download/VellumScan.apk" class="btn-download">
+        Download VellumScan APK
       </a>
-      <div class="file-meta">Version 1.3.0 • Android 7.0+ (64-bit ARM) • 100% Free & Open Source</div>
+      <div class="file-meta">Version 2.0.0 • Android 7.0+ (64-bit) • 100% Free & Offline<br>Tap above to download directly—no login required.</div>
     </div>
 
     <div class="features-grid">
       <div class="feature-card">
         <div class="feature-icon">🔍</div>
-        <div class="feature-title">Searchable "Sandwich" PDFs</div>
-        <div class="feature-desc">Embeds an invisible, selectable OCR text layer so you can Ctrl+F search or copy words inside any PDF reader.</div>
+        <div class="feature-title">Searchable PDFs</div>
+        <div class="feature-desc">Embeds an invisible selectable text layer so you can search and copy text inside any PDF viewer.</div>
       </div>
       <div class="feature-card">
         <div class="feature-icon">🌐</div>
-        <div class="feature-title">Multi-Script Offline OCR</div>
-        <div class="feature-desc">100% on-device recognition for English, Bangla (বাংলা), and Devanagari (हिन्दी) without internet.</div>
+        <div class="feature-title">Default English & Bangla + Add-On Scripts</div>
+        <div class="feature-desc">English and Bangla are built-in offline. Download or remove Devanagari, Chinese, Japanese, and Korean anytime.</div>
       </div>
       <div class="feature-card">
         <div class="feature-icon">🪪</div>
         <div class="feature-title">ID Card 2-in-1 Page</div>
-        <div class="feature-desc">Automatically stitches the front and back of IDs, cards, and passports onto a single clean A4 page.</div>
+        <div class="feature-desc">Stitches the front and back of IDs and passports onto a single clean A4 page.</div>
       </div>
       <div class="feature-card">
         <div class="feature-icon">🔒</div>
-        <div class="feature-title">Tap-to-Redact PII</div>
-        <div class="feature-desc">Permanently blacks out sensitive phone numbers, emails, and card numbers from both image and PDF layers.</div>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">📊</div>
-        <div class="feature-title">Table to CSV Export</div>
-        <div class="feature-desc">Clusters word coordinates to convert printed tables and receipts into editable Excel/Google Sheets CSV files.</div>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">⚡</div>
-        <div class="feature-title">Compact & Fast</div>
-        <div class="feature-desc">Optimized 85% JPEG stream compresses 40MB scans down to ~2MB with parallel multi-core CPU recognition.</div>
+        <div class="feature-title">Auto-Redact Sensitive Info</div>
+        <div class="feature-desc">Permanently blacks out sensitive phone numbers, emails, and ID numbers from both image and PDF layers.</div>
       </div>
     </div>
 
     <footer>
-      <p>Created with open-source software • <a href="https://github.com/asanaim/LumaScan">View on GitHub</a></p>
+      <p><a id="repo-link" href="https://github.com/asanaim/LumaScan">View Source on GitHub</a></p>
     </footer>
   </div>
+
+  <script>
+    // Dynamically resolve owner & repo name from GitHub Pages URL so the link never breaks
+    (function () {
+      var hostParts = window.location.hostname.split('.');
+      var pathParts = window.location.pathname.split('/').filter(Boolean);
+      if (hostParts.length >= 3 && hostParts[1] === 'github' && hostParts[2] === 'io' && pathParts.length >= 1) {
+        var owner = hostParts[0];
+        var repo = pathParts[0];
+        document.getElementById('apk-download-btn').href =
+          'https://github.com/' + owner + '/' + repo + '/releases/latest/download/VellumScan.apk';
+        document.getElementById('repo-link').href =
+          'https://github.com/' + owner + '/' + repo;
+      }
+    })();
+  </script>
 </body>
 </html>

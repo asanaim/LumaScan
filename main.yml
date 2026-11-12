@@ -1,4 +1,4 @@
-name: Build LumaScan APK
+name: Build VellumScan APK & Publish Download Page
 
 on:
   push:
@@ -21,7 +21,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Download Offline Tesseract Models (Bangla + English)
+      - name: Download Default Offline Tesseract Models (Bangla + English)
         run: |
           mkdir -p app/src/main/assets/tessdata
           curl -L -o app/src/main/assets/tessdata/eng.traineddata https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata
@@ -42,27 +42,52 @@ jobs:
       - name: Build Debug APK
         run: gradle assembleDebug --no-daemon
 
-      - name: Copy APK to standard naming for release
+      - name: Prepare VellumScan.apk for Direct Download
         run: |
           mkdir -p release-apk
-          cp app/build/outputs/apk/debug/app-debug.apk release-apk/LumaScan.apk
+          cp app/build/outputs/apk/debug/app-debug.apk release-apk/VellumScan.apk
 
-      - name: Upload Artifact
+      - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LumaScan-Release-APK
-          path: release-apk/LumaScan.apk
+          name: VellumScan-Android-APK
+          path: release-apk/VellumScan.apk
 
-      - name: Create or Update GitHub Release (1-Click Download for Non-IT)
+      - name: Publish Direct 1-Click Release Link
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest
-          name: "LumaScan Latest Release (Direct 1-Click Download)"
-          body: |
-            ### Direct 1-Click Download Link for Android:
-            Click the link below on any phone or computer to download immediately (no GitHub account required):
-            - **[Download LumaScan.apk](https://github.com/${{ github.repository }}/releases/download/latest/LumaScan.apk)**
-          files: release-apk/LumaScan.apk
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view latest --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload latest release-apk/VellumScan.apk --clobber --repo "${{ github.repository }}"
+          else
+            gh release create latest release-apk/VellumScan.apk \
+              --title "VellumScan Latest Release (1-Click Download)" \
+              --notes "Direct 1-Click Android Download: https://github.com/${{ github.repository }}/releases/latest/download/VellumScan.apk" \
+              --repo "${{ github.repository }}"
+          fi
+
+  deploy-pages:
+    needs: build
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup GitHub Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Upload Web Download Page Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - name: Deploy Download Page to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
