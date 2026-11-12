@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.vellumscan.app"
+    namespace = "com.lumascan.app"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.vellumscan.app"
+        applicationId = "com.nuvioscan.app"
         minSdk = 24
         targetSdk = 34
         versionCode = 5
@@ -56,12 +56,12 @@ dependencies {
     // ML Kit Document Scanner
     implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
 
-    // Default Bundled Offline ML Kit Latin Recognizer
+    // Default Bundled Offline ML Kit v2 Latin/English Recognizer
     implementation("com.google.mlkit:text-recognition:16.0.1")
 
-    // Offline Multi-Threaded Tesseract 5 Engine (Default Bangla + On-Demand Devanagari/CJK)
+    // Multi-Threaded OpenMP Tesseract 5 Engine (Default Bangla+English & On-Demand Devanagari/Chinese/Japanese/Korean)
     implementation("cz.adaptech.tesseract4android:tesseract4android-openmp:4.9.0")
 
-    // Coroutines
+    // Coroutines for parallel multi-core OCR & on-demand model downloads
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 }

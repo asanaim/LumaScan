@@ -30,7 +30,7 @@ data class PageOcrData(
 object SearchablePdfGenerator {
 
     const val DOWNLOAD_PAGE_URL = "https://asanaim.github.io/LumaScan/"
-    const val DIRECT_APK_DOWNLOAD_URL = "https://github.com/asanaim/LumaScan/releases/download/latest/LumaScan.apk"
+    const val DIRECT_APK_DOWNLOAD_URL = "https://github.com/asanaim/LumaScan/releases/latest/download/NuvioScan.apk"
 
     private val sensitivePattern = Regex(
         "(\\b\\d{4}[ -]?\\d{4}[ -]?\\d{4,7}\\b)|(\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b)|(\\+?\\d[\\d -]{7,14}\\d)"
@@ -139,12 +139,15 @@ object SearchablePdfGenerator {
         }
     }
 
+    /**
+     * Generates a searchable PDF where both the OCR text layer and the embedded download URL
+     * are written strictly in the invisible PDF text stream (nothing is visibly printed over the scan).
+     */
     fun generateSearchablePdf(
         context: Context,
         pages: List<PageOcrData>,
         outputFileName: String,
-        redactSensitivePii: Boolean = false,
-        embedFooterDownloadLink: Boolean = true
+        redactSensitivePii: Boolean = false
     ): Uri? {
         if (pages.isEmpty()) return null
 
@@ -161,13 +164,6 @@ object SearchablePdfGenerator {
             style = Paint.Style.FILL
         }
 
-        val footerTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(140, 100, 100, 100)
-            textSize = 24f
-            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
-            textAlign = Paint.Align.CENTER
-        }
-
         try {
             pages.forEachIndexed { index, pageData ->
                 val compressedBmp = compressBitmapEfficient(pageData.bitmap)
@@ -181,8 +177,10 @@ object SearchablePdfGenerator {
                 val page = pdfDocument.startPage(pageInfo)
                 val canvas = page.canvas
 
+                // 1. Draw clean scanned page image (no visible watermarks or printed footers)
                 canvas.drawBitmap(compressedBmp, 0f, 0f, null)
 
+                // 2. Draw invisible selectable OCR text overlay
                 for (word in pageData.words) {
                     val box = word.boundingBox
                     val value = word.text.trim()
@@ -207,17 +205,11 @@ object SearchablePdfGenerator {
                     canvas.drawText(value, box.left.toFloat(), baselineY, invisibleTextPaint)
                 }
 
-                if (embedFooterDownloadLink) {
-                    val footerY = compressedBmp.height.toFloat() - 28f
-                    val centerX = compressedBmp.width.toFloat() / 2f
-                    val footerLabel = "Scanned with LumaScan • Download App: $DOWNLOAD_PAGE_URL"
-
-                    canvas.drawText(footerLabel, centerX, footerY, footerTextPaint)
-
-                    invisibleTextPaint.textSize = 26f
-                    invisibleTextPaint.textScaleX = 1.0f
-                    canvas.drawText(DOWNLOAD_PAGE_URL, centerX - 100f, footerY, invisibleTextPaint)
-                }
+                // 3. Embed the download link invisibly in the PDF stream (not printed visibly on the page)
+                val hiddenFooterY = compressedBmp.height.toFloat() - 12f
+                invisibleTextPaint.textSize = 18f
+                invisibleTextPaint.textScaleX = 1.0f
+                canvas.drawText(DIRECT_APK_DOWNLOAD_URL, 24f, hiddenFooterY, invisibleTextPaint)
 
                 pdfDocument.finishPage(page)
                 if (compressedBmp != pageData.bitmap) {

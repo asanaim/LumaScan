@@ -1,4 +1,4 @@
-name: Build VellumScan APK & Publish Download Page
+name: Build NuvioScan APK
 
 on:
   push:
@@ -11,8 +11,6 @@ on:
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
 
 jobs:
   build:
@@ -42,52 +40,31 @@ jobs:
       - name: Build Debug APK
         run: gradle assembleDebug --no-daemon
 
-      - name: Prepare VellumScan.apk for Direct Download
+      - name: Prepare Release APKs
         run: |
           mkdir -p release-apk
-          cp app/build/outputs/apk/debug/app-debug.apk release-apk/VellumScan.apk
+          cp app/build/outputs/apk/debug/app-debug.apk release-apk/NuvioScan.apk
+          cp app/build/outputs/apk/debug/app-debug.apk release-apk/LumaScan.apk
 
-      - name: Upload Build Artifact
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: VellumScan-Android-APK
-          path: release-apk/VellumScan.apk
+          name: NuvioScan-Release-APK
+          path: release-apk/NuvioScan.apk
 
-      - name: Publish Direct 1-Click Release Link
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
+      - name: Publish 1-Click Direct Download Release
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "NuvioScan v2.0 (Direct 1-Click APK Download)"
+          make_latest: true
+          body: |
+            ### 📲 Direct 1-Click Download for Android (Non-IT Friendly)
+            Tap the link below on any Android phone to download and install **NuvioScan** immediately (no GitHub account required):
+            - **[Download NuvioScan.apk](https://github.com/${{ github.repository }}/releases/latest/download/NuvioScan.apk)**
+          files: |
+            release-apk/NuvioScan.apk
+            release-apk/LumaScan.apk
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if gh release view latest --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            gh release upload latest release-apk/VellumScan.apk --clobber --repo "${{ github.repository }}"
-          else
-            gh release create latest release-apk/VellumScan.apk \
-              --title "VellumScan Latest Release (1-Click Download)" \
-              --notes "Direct 1-Click Android Download: https://github.com/${{ github.repository }}/releases/latest/download/VellumScan.apk" \
-              --repo "${{ github.repository }}"
-          fi
-
-  deploy-pages:
-    needs: build
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-    runs-on: ubuntu-24.04
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Setup GitHub Pages
-        uses: actions/configure-pages@v5
-        with:
-          enablement: true
-
-      - name: Upload Web Download Page Artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: docs
-
-      - name: Deploy Download Page to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

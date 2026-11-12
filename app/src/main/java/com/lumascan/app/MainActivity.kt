@@ -20,6 +20,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -32,6 +34,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -45,8 +48,6 @@ import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions.*
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.TextRecognizer
-import com.google.mlkit.vision.text.devanagari.DevanagariTextRecognizerOptions
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.googlecode.tesseract.android.TessBaseAPI
 import kotlinx.coroutines.Dispatchers
@@ -59,13 +60,24 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.*
 
-enum class OcrScript(val label: String) {
-    LATIN("English / Latin"),
-    BANG_ENG("Bangla + English"),
-    DEVANAGARI_ENG("Devanagari + English")
+enum class OcrScript(
+    val label: String,
+    val tessCode: String,
+    val trainedDataFile: String?,
+    val isBuiltInDefault: Boolean,
+    val approxSizeMb: String
+) {
+    LATIN("English", "eng", null, true, "Built-in"),
+    BANG_ENG("Bangla + English", "ben+eng", "ben.traineddata", true, "Built-in"),
+    DEVANAGARI_ENG("Devanagari + English", "hin+eng", "hin.traineddata", false, "1.8 MB"),
+    CHINESE_ENG("Chinese + English", "chi_sim+eng", "chi_sim.traineddata", false, "2.4 MB"),
+    JAPANESE_ENG("Japanese + English", "jpn+eng", "jpn.traineddata", false, "2.4 MB"),
+    KOREAN_ENG("Korean + English", "kor+eng", "kor.traineddata", false, "1.6 MB")
 }
 
 data class ScannedDoc(
@@ -87,26 +99,27 @@ data class ScannedDoc(
 
 class MainActivity : ComponentActivity() {
 
-    private val recognizers = mutableMapOf<OcrScript, TextRecognizer>()
-    private val tessMutex = Mutex()
-    private var cachedTessApi: TessBaseAPI? = null
-    private val dbHelper by lazy { LumaScanDbHelper(this) }
-
-    private fun getMlKitRecognizer(script: OcrScript): TextRecognizer {
-        return recognizers.getOrPut(script) {
-            when (script) {
-                OcrScript.DEVANAGARI_ENG -> TextRecognition.getClient(DevanagariTextRecognizerOptions.Builder().build())
-                else -> TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-            }
-        }
+    private val latinRecognizer by lazy {
+        TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     }
 
+    private val tessMutex = Mutex()
+    private var cachedTessApi: TessBaseAPI? = null
+    private var cachedTessLang: String? = null
+    private val dbHelper by lazy { LumaScanDbHelper(this) }
+
     private fun getOrInitTesseract(langCode: String): TessBaseAPI? {
-        cachedTessApi?.let { return it }
-        val tessDataParentDir = prepareTessDataFiles(listOf("ben.traineddata", "eng.traineddata")) ?: return null
+        if (cachedTessApi != null && cachedTessLang == langCode) {
+            return cachedTessApi
+        }
+        cachedTessApi?.recycle()
+        cachedTessApi = null
+
+        val tessDataParentDir = prepareDefaultTessDataFiles() ?: return null
         val tess = TessBaseAPI()
         return if (tess.init(tessDataParentDir, langCode)) {
             cachedTessApi = tess
+            cachedTessLang = langCode
             tess
         } else {
             tess.recycle()
@@ -114,6 +127,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun isScriptInstalled(script: OcrScript): Boolean {
+        if (script.isBuiltInDefault) return true
+        val fileName = script.trainedDataFile ?: return true
+        val file = File(File(filesDir, "tessdata"), fileName)
+        return file.exists() && file.length() > 100_000L
+    }
+
+    @OptIn(ExperimentalFoundationApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -130,19 +151,29 @@ class MainActivity : ComponentActivity() {
             val appleBlue = Color(0xFF0A84FF)
             val appleGreen = Color(0xFF30D158)
             val appleOrange = Color(0xFFFF9F0A)
+            val appleRed = Color(0xFFFF3B30)
             val appleBg = Color(0xFFF2F2F7)
 
-            var selectedScript by remember { mutableStateOf(OcrScript.LATIN) }
+            var selectedScript by remember { mutableStateOf(OcrScript.BANG_ENG) }
             var idCardStitchMode by remember { mutableStateOf(false) }
             var redactSensitiveMode by remember { mutableStateOf(false) }
-            var embedLinkFooter by remember { mutableStateOf(true) }
             var searchQuery by remember { mutableStateOf("") }
+
+            val installedScripts = remember {
+                mutableStateListOf<OcrScript>().apply {
+                    OcrScript.entries.forEach { if (isScriptInstalled(it)) add(it) }
+                }
+            }
+            var showLanguageManager by remember { mutableStateOf(false) }
+            var scriptToRemoveConfirm by remember { mutableStateOf<OcrScript?>(null) }
+            var downloadingScript by remember { mutableStateOf<OcrScript?>(null) }
 
             val scannedDocs = remember { mutableStateListOf<ScannedDoc>() }
             var activeOcrDoc by remember { mutableStateOf<ScannedDoc?>(null) }
 
             LaunchedEffect(Unit) {
                 withContext(Dispatchers.IO) {
+                    prepareDefaultTessDataFiles()
                     val saved = dbHelper.getAllDocs()
                     withContext(Dispatchers.Main) {
                         scannedDocs.clear()
@@ -171,7 +202,6 @@ class MainActivity : ComponentActivity() {
                         currentScript = selectedScript,
                         stitchId = idCardStitchMode,
                         redactPii = redactSensitiveMode,
-                        embedFooter = embedLinkFooter,
                         scannedDocs = scannedDocs,
                         rawPdfUri = null
                     )
@@ -191,7 +221,6 @@ class MainActivity : ComponentActivity() {
                             currentScript = selectedScript,
                             stitchId = idCardStitchMode,
                             redactPii = redactSensitiveMode,
-                            embedFooter = embedLinkFooter,
                             scannedDocs = scannedDocs,
                             rawPdfUri = rawPdf?.uri
                         )
@@ -216,52 +245,77 @@ class MainActivity : ComponentActivity() {
             Surface(modifier = Modifier.fillMaxSize(), color = appleBg) {
                 Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 14.dp)) {
                     Spacer(modifier = Modifier.height(10.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(
-                                text = "LumaScan",
-                                fontSize = 32.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Black
-                            )
-                            Text(
-                                text = "Fast Offline Scanner • Searchable PDF • Multi-Script",
-                                fontSize = 13.sp,
-                                color = Color.Gray
-                            )
-                        }
-                        IconButton(onClick = { shareAppDownloadLink() }) {
-                            Text("🔗", fontSize = 22.sp)
-                        }
-                    }
+                    Text(
+                        text = "NuvioScan",
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Black
+                    )
+                    Text(
+                        text = "Fast Offline Scanner • Searchable PDF • Multi-Script",
+                        fontSize = 13.sp,
+                        color = Color.Gray
+                    )
 
                     Spacer(modifier = Modifier.height(12.dp))
 
+                    // Hybrid Cupertino Language Bar:
+                    // - English & Bangla+English are built-in by default
+                    // - Downloaded languages appear here; long-press any downloaded language to remove it
+                    // - "+ Languages" button opens the on-demand Downloader / Manager sheet
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        OcrScript.entries.forEach { script ->
+                        installedScripts.forEach { script ->
                             val isSelected = selectedScript == script
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = { selectedScript = script },
-                                label = { Text(script.label, fontSize = 13.sp) },
+                            Surface(
+                                color = if (isSelected) appleBlue else Color.White,
                                 shape = RoundedCornerShape(20.dp),
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = appleBlue,
-                                    selectedLabelColor = Color.White
+                                tonalElevation = 1.dp,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .combinedClickable(
+                                        onClick = { selectedScript = script },
+                                        onLongClick = {
+                                            if (!script.isBuiltInDefault) {
+                                                scriptToRemoveConfirm = script
+                                            } else {
+                                                Toast.makeText(
+                                                    this@MainActivity,
+                                                    "${script.label} is a built-in default language.",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        }
+                                    )
+                            ) {
+                                Text(
+                                    text = script.label,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = if (isSelected) Color.White else Color.Black,
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
                                 )
-                            )
+                            }
+                        }
+
+                        OutlinedButton(
+                            onClick = { showLanguageManager = true },
+                            shape = RoundedCornerShape(20.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.height(35.dp)
+                        ) {
+                            Text("+ Languages", fontSize = 12.sp, color = appleBlue, fontWeight = FontWeight.SemiBold)
                         }
                     }
 
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Clean Feature Chips (Removed the PDF App Link chip from UI as requested)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -285,16 +339,6 @@ class MainActivity : ComponentActivity() {
                             shape = RoundedCornerShape(18.dp),
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = Color.Black,
-                                selectedLabelColor = Color.White
-                            )
-                        )
-                        FilterChip(
-                            selected = embedLinkFooter,
-                            onClick = { embedLinkFooter = !embedLinkFooter },
-                            label = { Text("🔗 PDF App Link", fontSize = 12.sp) },
-                            shape = RoundedCornerShape(18.dp),
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Color(0xFF5856D6),
                                 selectedLabelColor = Color.White
                             )
                         )
@@ -484,6 +528,124 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // Hybrid Cupertino Language Manager Dialog (Download / Remove optional scripts)
+                if (showLanguageManager) {
+                    AlertDialog(
+                        onDismissRequest = { if (downloadingScript == null) showLanguageManager = false },
+                        title = {
+                            Text("Manage OCR Languages", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Text(
+                                    "English and Bangla are built-in by default. Download additional offline scripts when needed, or remove them (or long-press their chip) to free space.",
+                                    fontSize = 13.sp,
+                                    color = Color.Gray
+                                )
+                                OcrScript.entries.forEach { script ->
+                                    val isInstalled = installedScripts.contains(script)
+                                    val isDownloading = downloadingScript == script
+                                    Surface(
+                                        color = Color(0xFFF2F2F7),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(script.label, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                                Text(script.approxSizeMb, fontSize = 12.sp, color = Color.Gray)
+                                            }
+                                            if (script.isBuiltInDefault) {
+                                                Text("Default", fontSize = 12.sp, color = appleGreen, fontWeight = FontWeight.SemiBold)
+                                            } else if (isDownloading) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(20.dp),
+                                                    strokeWidth = 2.dp,
+                                                    color = appleBlue
+                                                )
+                                            } else if (isInstalled) {
+                                                TextButton(
+                                                    onClick = {
+                                                        deleteScriptModel(script)
+                                                        installedScripts.remove(script)
+                                                        if (selectedScript == script) {
+                                                            selectedScript = OcrScript.BANG_ENG
+                                                        }
+                                                    }
+                                                ) {
+                                                    Text("Remove", color = appleRed, fontWeight = FontWeight.SemiBold)
+                                                }
+                                            } else {
+                                                Button(
+                                                    onClick = {
+                                                        downloadingScript = script
+                                                        downloadScriptModel(script) { success ->
+                                                            downloadingScript = null
+                                                            if (success) {
+                                                                if (!installedScripts.contains(script)) {
+                                                                    installedScripts.add(script)
+                                                                }
+                                                                selectedScript = script
+                                                            }
+                                                        }
+                                                    },
+                                                    colors = ButtonDefaults.buttonColors(containerColor = appleBlue),
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                                ) {
+                                                    Text("Download", fontSize = 12.sp)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = { if (downloadingScript == null) showLanguageManager = false }
+                            ) {
+                                Text("Done", color = appleBlue, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    )
+                }
+
+                // Long-press quick removal confirmation dialog
+                scriptToRemoveConfirm?.let { script ->
+                    AlertDialog(
+                        onDismissRequest = { scriptToRemoveConfirm = null },
+                        title = { Text("Remove ${script.label}?", fontWeight = FontWeight.Bold) },
+                        text = {
+                            Text("This will delete the offline ${script.label} recognition model (${script.approxSizeMb}) from your device. You can re-download it anytime.")
+                        },
+                        confirmButton = {
+                            Button(
+                                onClick = {
+                                    deleteScriptModel(script)
+                                    installedScripts.remove(script)
+                                    if (selectedScript == script) {
+                                        selectedScript = OcrScript.BANG_ENG
+                                    }
+                                    scriptToRemoveConfirm = null
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = appleRed)
+                            ) {
+                                Text("Remove")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { scriptToRemoveConfirm = null }) {
+                                Text("Cancel", color = Color.Gray)
+                            }
+                        }
+                    )
+                }
+
                 activeOcrDoc?.let { doc ->
                     AlertDialog(
                         onDismissRequest = { activeOcrDoc = null },
@@ -528,18 +690,71 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun downloadScriptModel(script: OcrScript, onResult: (Boolean) -> Unit) {
+        val fileName = script.trainedDataFile
+        if (fileName == null) {
+            onResult(true)
+            return
+        }
+        lifecycleScope.launch(Dispatchers.IO) {
+            val success = try {
+                val tessDir = File(filesDir, "tessdata")
+                if (!tessDir.exists()) tessDir.mkdirs()
+                val targetFile = File(tessDir, fileName)
+                val tempFile = File(tessDir, "$fileName.tmp")
+
+                val url = URL("https://github.com/tesseract-ocr/tessdata_fast/raw/main/$fileName")
+                val conn = (url.openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 15000
+                    readTimeout = 30000
+                    instanceFollowRedirects = true
+                }
+                conn.inputStream.use { input ->
+                    FileOutputStream(tempFile).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                if (tempFile.length() > 100_000L) {
+                    tempFile.renameTo(targetFile)
+                    true
+                } else {
+                    tempFile.delete()
+                    false
+                }
+            } catch (e: Exception) {
+                false
+            }
+            withContext(Dispatchers.Main) {
+                if (success) {
+                    Toast.makeText(this@MainActivity, "${script.label} downloaded for offline use", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this@MainActivity, "Download failed. Check internet connection.", Toast.LENGTH_SHORT).show()
+                }
+                onResult(success)
+            }
+        }
+    }
+
+    private fun deleteScriptModel(script: OcrScript) {
+        val fileName = script.trainedDataFile ?: return
+        val file = File(File(filesDir, "tessdata"), fileName)
+        if (file.exists()) {
+            file.delete()
+        }
+        Toast.makeText(this, "${script.label} removed", Toast.LENGTH_SHORT).show()
+    }
+
     private fun handlePageUris(
         uris: List<Uri>,
         currentScript: OcrScript,
         stitchId: Boolean,
         redactPii: Boolean,
-        embedFooter: Boolean,
         scannedDocs: MutableList<ScannedDoc>,
         rawPdfUri: Uri?
     ) {
         val docId = System.currentTimeMillis()
         val timestamp = SimpleDateFormat("MMM dd, yyyy • hh:mm a", Locale.getDefault()).format(Date())
-        val tempName = "LumaScan_${docId % 10000}.pdf"
+        val tempName = "NuvioScan_${docId % 10000}.pdf"
 
         val placeholderDoc = ScannedDoc(
             id = docId,
@@ -561,8 +776,7 @@ class MainActivity : ComponentActivity() {
             script = currentScript,
             docId = docId,
             stitchTwoPages = stitchId,
-            redactPii = redactPii,
-            embedFooter = embedFooter
+            redactPii = redactPii
         ) { smartPdfName, extractedText, csvContent, searchablePdfUri, pageCount ->
             val finalPdfUri = searchablePdfUri ?: rawPdfUri
             if (finalPdfUri != null) {
@@ -613,7 +827,6 @@ class MainActivity : ComponentActivity() {
         docId: Long,
         stitchTwoPages: Boolean,
         redactPii: Boolean,
-        embedFooter: Boolean,
         onComplete: (
             smartPdfName: String,
             extractedText: String,
@@ -633,10 +846,10 @@ class MainActivity : ComponentActivity() {
                 rawBitmaps
             }
 
-            val pageDataList = if (script == OcrScript.BANG_ENG) {
-                extractTesseractFromBitmaps(processedBitmaps, "ben+eng")
+            val pageDataList = if (script == OcrScript.LATIN) {
+                extractMlKitParallelFromBitmaps(processedBitmaps)
             } else {
-                extractMlKitParallelFromBitmaps(processedBitmaps, script)
+                extractTesseractFromBitmaps(processedBitmaps, script.tessCode)
             }
 
             val smartBaseName = generateSmartFileName(pageDataList, docId)
@@ -664,8 +877,7 @@ class MainActivity : ComponentActivity() {
                 context = this@MainActivity,
                 pages = pageDataList,
                 outputFileName = smartPdfName,
-                redactSensitivePii = redactPii,
-                embedFooterDownloadLink = embedFooter
+                redactSensitivePii = redactPii
             )
 
             pageDataList.forEach { it.bitmap.recycle() }
@@ -677,15 +889,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private suspend fun extractMlKitParallelFromBitmaps(
-        bitmaps: List<Bitmap>,
-        script: OcrScript
+        bitmaps: List<Bitmap>
     ): List<PageOcrData> = coroutineScope {
-        val recognizer = getMlKitRecognizer(script)
         bitmaps.map { bitmap ->
             async(Dispatchers.Default) {
                 try {
                     val inputImage = InputImage.fromBitmap(bitmap, 0)
-                    val visionText = Tasks.await(recognizer.process(inputImage))
+                    val visionText = Tasks.await(latinRecognizer.process(inputImage))
                     val wordBoxes = mutableListOf<OcrWordBox>()
 
                     for (block in visionText.textBlocks) {
@@ -744,21 +954,25 @@ class MainActivity : ComponentActivity() {
         results
     }
 
+    /**
+     * Preserves Unicode combining marks (\p{M}) so Bangla vowel signs (া, ি, ী, ু, ূ, ৃ, ে, ৈ, ো, ৌ, ং, ্)
+     * remain intact in filenames instead of being replaced with underscores.
+     */
     private fun generateSmartFileName(pages: List<PageOcrData>, docId: Long): String {
         val firstLine = pages.firstOrNull()?.fullPageText
             ?.lineSequence()
             ?.map { it.trim() }
-            ?.firstOrNull { it.length in 4..40 && it.any { ch -> ch.isLetter() } }
+            ?.firstOrNull { it.length in 3..45 && it.any { ch -> ch.isLetter() } }
 
         val sanitized = firstLine
-            ?.replace(Regex("[^\\p{L}\\p{N}_-]+"), "_")
+            ?.replace(Regex("[^\\p{L}\\p{M}\\p{N}_-]+"), "_")
             ?.trim('_')
-            ?.take(28)
+            ?.take(32)
 
         return if (!sanitized.isNullOrBlank()) {
             "${sanitized}_${docId % 10000}"
         } else {
-            "LumaScan_${docId % 100000}"
+            "NuvioScan_${docId % 100000}"
         }
     }
 
@@ -782,17 +996,6 @@ class MainActivity : ComponentActivity() {
         startActivity(intent)
     }
 
-    private fun shareAppDownloadLink() {
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(
-                Intent.EXTRA_TEXT,
-                "Download LumaScan (Fast, 100% Offline Searchable Scanner & OCR): ${SearchablePdfGenerator.DOWNLOAD_PAGE_URL}"
-            )
-        }
-        startActivity(Intent.createChooser(intent, "Share LumaScan Download Link"))
-    }
-
     private fun decodeMutableBitmap(uri: Uri): Bitmap? {
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -811,12 +1014,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun prepareTessDataFiles(fileNames: List<String>): String? {
+    private fun prepareDefaultTessDataFiles(): String? {
         return try {
             val tessDir = File(filesDir, "tessdata")
             if (!tessDir.exists()) tessDir.mkdirs()
 
-            for (name in fileNames) {
+            for (name in listOf("ben.traineddata", "eng.traineddata")) {
                 val outFile = File(tessDir, name)
                 if (!outFile.exists()) {
                     assets.open("tessdata/$name").use { input ->
@@ -834,7 +1037,7 @@ class MainActivity : ComponentActivity() {
 
     private fun copyToClipboard(text: String) {
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("LumaScan OCR", text))
+        clipboard.setPrimaryClip(ClipData.newPlainText("NuvioScan OCR", text))
         Toast.makeText(this, "OCR text copied to clipboard", Toast.LENGTH_SHORT).show()
     }
 
@@ -843,7 +1046,7 @@ class MainActivity : ComponentActivity() {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, fileName)
                 put(MediaStore.Downloads.MIME_TYPE, "application/pdf")
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/LumaScan")
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/NuvioScan")
             }
             contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)?.let { dest ->
                 contentResolver.openInputStream(sourceUri)?.use { input ->
@@ -851,7 +1054,7 @@ class MainActivity : ComponentActivity() {
                         input.copyTo(output)
                     }
                 }
-                Toast.makeText(this, "Saved $fileName to Downloads/LumaScan", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Saved $fileName to Downloads/NuvioScan", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -861,7 +1064,7 @@ class MainActivity : ComponentActivity() {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, fileName)
                 put(MediaStore.Downloads.MIME_TYPE, mimeType)
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/LumaScan")
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/NuvioScan")
             }
             contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)?.let { dest ->
                 contentResolver.openOutputStream(dest)?.use { output ->
@@ -890,7 +1093,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        recognizers.values.forEach { it.close() }
+        latinRecognizer.close()
         cachedTessApi?.recycle()
         cachedTessApi = null
     }
